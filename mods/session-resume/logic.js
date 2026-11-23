@@ -17,7 +17,9 @@ const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish", "nu", "elvis
 const STATUS_ALIAS = { "claude-code": "claude" };
 const MAX_AGE_MS = 30 * 24 * 3600 * 1000;
 const REFRESH_SEEN_MS = 3600 * 1000;
-const HOLD_MS = 90 * 1000;
+const SETTLE_MS = 4000;
+const RETRY_MS = 12000;
+const MAX_ATTEMPTS = 3;
 
 export const baseName = (p) => String(p ?? "").split("/").pop();
 
@@ -114,11 +116,15 @@ export function reconcile(state, terminals, ctx) {
 
     if (prev.boot !== boot) {
       // A reboot (or a core restart) took the agent away; the shell is back.
-      if (!(prev.restore_boot === boot)) {
+      // Send the command, then check again: the shell may not have been ready.
+      const tries = prev.restore?.boot === boot ? prev.restore.attempts : 0;
+      const last = prev.restore?.boot === boot ? prev.restore.last : 0;
+      const settled = !terminal.program_started_ms || now - terminal.program_started_ms >= SETTLE_MS;
+      if (settled && tries < MAX_ATTEMPTS && now - last >= RETRY_MS) {
         const text = commandFor(prev, terminal, table);
         if (text) {
-          restore.push({ address: terminal.address, agent: prev.agent, text });
-          entries[terminal.address] = { ...prev, restore_boot: boot, hold_until: now + HOLD_MS };
+          restore.push({ address: terminal.address, agent: prev.agent, text, attempt: tries + 1 });
+          entries[terminal.address] = { ...prev, restore: { boot, attempts: tries + 1, last: now } };
           changed = true;
         }
       }

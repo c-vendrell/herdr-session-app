@@ -59,9 +59,11 @@ async function tick() {
     const table = continueTable(config);
     const result = reconcile(data, terminals(), { boot, now: Date.now(), table, ready });
 
+    const logs = [];
+    const stamp = new Date().toISOString().slice(11, 19);
     if (result.changed) {
       try {
-        await writeTextFile(STATE_FILE(), JSON.stringify(result.state, null, 2) + "\n", raw);
+        await writeTextFile(STATE_FILE(), JSON.stringify({ ...result.state, log: data?.log ?? [] }, null, 2) + "\n", raw);
       } catch {
         return; // Stale snapshot: try again on the next tick, before typing anything.
       }
@@ -69,10 +71,26 @@ async function tick() {
 
     let resumed = 0;
     for (const item of result.restore) {
+      let line;
       try {
         const r = await hc(["send", item.address, item.text]);
         if (r.code === 0) resumed++;
-      } catch {}
+        line = `${stamp} send ${item.address} try ${item.attempt} -> code ${r.code} ${(r.stderr || r.stdout || "").trim().slice(0, 120)}`;
+      } catch (error) {
+        line = `${stamp} send ${item.address} try ${item.attempt} -> error ${String(error?.message ?? error).slice(0, 120)}`;
+      }
+      logs.push(line);
+    }
+    if (logs.length) {
+      // Keep the last results in the state file, to see what happened after a reboot.
+      for (let i = 0; i < 3; i++) {
+        const cur = await readJson(STATE_FILE());
+        if (!cur.data) break;
+        try {
+          await writeTextFile(STATE_FILE(), JSON.stringify({ ...cur.data, log: [...(cur.data.log ?? []), ...logs].slice(-30) }, null, 2) + "\n", cur.raw);
+          break;
+        } catch {}
+      }
     }
     if (resumed && config?.notify !== false) {
       notify({

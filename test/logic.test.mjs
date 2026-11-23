@@ -28,13 +28,25 @@ test("after a reboot the shell gets the continue command", () => {
   assert.ok(out.state.entries.t1, "entry is kept until the agent is back");
 });
 
-test("restore is sent once per boot", () => {
+test("restore retries a few times, spaced out, then stops", () => {
   const before = run(null, [agent("t1", "codex")]).state;
   const a = run(before, [shell("t1")], { boot: "B2", now: NOW + 1000 });
-  const b = run(a.state, [shell("t1")], { boot: "B2", now: NOW + 20_000 });
-  assert.equal(a.restore.length, 1);
-  assert.equal(b.restore.length, 0);
+  const tooSoon = run(a.state, [shell("t1")], { boot: "B2", now: NOW + 5_000 });
+  const b = run(a.state, [shell("t1")], { boot: "B2", now: NOW + 14_000 });
+  const c = run(b.state, [shell("t1")], { boot: "B2", now: NOW + 28_000 });
+  const d = run(c.state, [shell("t1")], { boot: "B2", now: NOW + 60_000 });
   assert.equal(a.restore[0].text, "codex 'resume' '--last'");
+  assert.equal(tooSoon.restore.length, 0);
+  assert.equal(b.restore.length, 1);
+  assert.equal(c.restore.length, 1);
+  assert.equal(d.restore.length, 0, "gives up after 3 attempts");
+});
+
+test("waits until the recovered shell has settled", () => {
+  const before = run(null, [agent("t1", "claude")]).state;
+  const fresh = { ...shell("t1"), program_started_ms: NOW + 1000 - 1500 };
+  assert.equal(run(before, [fresh], { boot: "B2", now: NOW + 1000 }).restore.length, 0);
+  assert.equal(run(before, [fresh], { boot: "B2", now: NOW + 6000 }).restore.length, 1);
 });
 
 test("agent that came back refreshes the entry with the new boot", () => {
@@ -42,7 +54,7 @@ test("agent that came back refreshes the entry with the new boot", () => {
   const a = run(before, [shell("t1")], { boot: "B2", now: NOW + 1000 });
   const b = run(a.state, [agent("t1", "opencode")], { boot: "B2", now: NOW + 30_000 });
   assert.equal(b.state.entries.t1.boot, "B2");
-  assert.equal(b.state.entries.t1.restore_boot, undefined);
+  assert.equal(b.state.entries.t1.restore, undefined);
 });
 
 test("a stale agent report does not count when the foreground is a shell", () => {

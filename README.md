@@ -16,7 +16,9 @@ and, after a reboot, types the agent's "continue" command into the matching shel
 - If you close the agent yourself, or the terminal, the note is deleted. Only a
   *reboot* keeps it, so what you close stays closed.
 - After a reboot the core gives you the same terminals back as shells. The mod sees a
-  note from an earlier boot and types, for example, `claude '--continue'` there.
+  note from an earlier boot, waits until the shell has settled, and types, for example,
+  `claude '--continue'` there. It retries up to 3 times, 12 s apart, if the agent does not
+  start. What `hc send` answered is kept in the `log` field of `session-resume.json`.
 - Remote machines are not touched: their cores keep running on their own.
 
 | Agent | Command typed |
@@ -82,6 +84,8 @@ Create `<app home>/session-resume.config.json`:
   not repeated; add them in `continue` if you want them.
 - It needs the Herdr app open on a layout that hosts the mod. It does not start
   anything before the app opens.
+- Claude Code asks "do you trust this folder?" every time it starts in your **home folder**
+  (its answer is not remembered there). Use a project folder, or accept it by hand.
 - It types into your terminals. Use `enabled: false` if you ever want it to stop.
 
 ## Uninstall
