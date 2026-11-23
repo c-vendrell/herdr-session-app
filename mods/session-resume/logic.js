@@ -78,12 +78,13 @@ export function commandFor(entry, terminal, table) {
  * Update the saved entries from the live terminals.
  *   state:  { version, entries: { [address]: { agent, argv, cwd, boot, seen, hold_until? } } }
  *   ctx:    { boot, now, table, ready }  (`ready`: the local terminal list is trustworthy)
- * Returns { state, changed, restore: [{ address, agent, text }] }. Does not mutate `state`.
+ * Returns { state, changed, restore: [{ address, agent, text }], notes: [why a terminal was skipped] }. Does not mutate `state`.
  */
 export function reconcile(state, terminals, ctx) {
   const { boot, now, table, ready } = ctx;
   const entries = { ...(state?.entries ?? {}) };
   const restore = [];
+  const notes = [];
   let changed = false;
   for (const [address, entry] of Object.entries(entries)) {
     if (now - (entry.seen ?? 0) > MAX_AGE_MS) { delete entries[address]; changed = true; }
@@ -92,7 +93,10 @@ export function reconcile(state, terminals, ctx) {
   const seenAddresses = new Set();
 
   for (const terminal of local) {
-    if (terminal.state && terminal.state !== "live") continue;
+    if (terminal.state && terminal.state !== "live") {
+      if (entries[terminal.address]) notes.push(`${terminal.address}: state is ${terminal.state}`);
+      continue;
+    }
     seenAddresses.add(terminal.address);
     const agent = agentOf(terminal, table);
     const prev = entries[terminal.address];
@@ -112,7 +116,11 @@ export function reconcile(state, terminals, ctx) {
       continue;
     }
 
-    if (!prev || !isShell(terminal)) continue;
+    if (!prev) continue;
+    if (!isShell(terminal)) {
+      if (prev.boot !== boot) notes.push(`${terminal.address}: foreground is not a shell (${JSON.stringify(terminal.foreground?.argv ?? null)})`);
+      continue;
+    }
 
     if (prev.boot !== boot) {
       // A reboot (or a core restart) took the agent away; the shell is back.
@@ -120,6 +128,8 @@ export function reconcile(state, terminals, ctx) {
       const tries = prev.restore?.boot === boot ? prev.restore.attempts : 0;
       const last = prev.restore?.boot === boot ? prev.restore.last : 0;
       const settled = !terminal.program_started_ms || now - terminal.program_started_ms >= SETTLE_MS;
+      if (!settled) notes.push(`${terminal.address}: shell not settled yet`);
+      else if (tries >= MAX_ATTEMPTS) notes.push(`${terminal.address}: gave up after ${MAX_ATTEMPTS} attempts`);
       if (settled && tries < MAX_ATTEMPTS && now - last >= RETRY_MS) {
         const text = commandFor(prev, terminal, table);
         if (text) {
@@ -145,5 +155,5 @@ export function reconcile(state, terminals, ctx) {
     }
   }
 
-  return { state: { version: 1, entries }, changed, restore };
+  return { state: { version: 1, entries }, changed, restore, notes };
 }

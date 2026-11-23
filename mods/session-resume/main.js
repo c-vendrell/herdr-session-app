@@ -18,6 +18,7 @@ const DEFAULT_INTERVAL_S = 10;
 
 let bootId = null;
 let busy = false;
+const noted = new Set();
 
 async function readJson(path) {
   try {
@@ -67,6 +68,12 @@ async function tick() {
       } catch {
         return; // Stale snapshot: try again on the next tick, before typing anything.
       }
+    }
+
+    for (const note of result.notes ?? []) {
+      if (noted.has(note)) continue; // Log each reason once, not every tick.
+      noted.add(note);
+      logs.push(`${stamp} skip ${note}`);
     }
 
     let resumed = 0;
